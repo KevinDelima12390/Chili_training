@@ -1,0 +1,18 @@
+# YOLO Dataset Configuration Template
+# Path variables relative to the training workspace root
+
+path: ./dataset # Dataset root dir
+train: train/images # Train images
+val: val/images # Validation images
+test: # Optional test images
+
+# Class Names (Adjust class index mapping to match your annotations)
+names:
+  0: Bacterial Spot
+  1: Cercospora Leaf Spot
+  2: Curl Virus
+  3: Healthy Leaf
+  4: Nutrition Deficiency
+  5: White spot
+  6: Sick Leaf
+  7: Disease
