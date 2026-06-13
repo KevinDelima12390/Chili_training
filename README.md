@@ -1,99 +1,45 @@
-# Chili Disease Detection Model Training Workspace
+# Chili Disease Detection Model Training & Verification
 
-This workspace is designed to organize and streamline the process of retraining and upgrading the plant leaf disease detection models. You can either train using the cloud-based Roboflow platform or run fine-tuning locally on your MacBook M2.
+This workspace provides the automated scripts to download the dataset, train an edge-device optimized YOLO26 model using NVIDIA RTX 4090 + Intel i9 acceleration, and verify output parity between PyTorch and ONNX.
 
 ---
 
-## 📥 Dataset Acquisition (Mendeley Data)
-
-Before training the system, you need to acquire the **Chili Plant Leaf Disease and Growth Stage Dataset from Bangladesh**. We have provided a zero-dependency script that programmatically downloads and extracts the entire dataset automatically.
-
-### How to Run:
+## 📥 Step 1: Download the Dataset
+Download and extract the **Chili Plant Leaf Disease and Growth Stage Dataset** automatically:
 ```bash
-# Execute the downloader script
 python training/scripts/download_dataset.py
 ```
-This script will:
-1. Download the full ZIP file from Mendeley Data (`w9mr3vf56s` version 1).
-2. Show a real-time progress bar.
-3. Automatically extract all images into `training/dataset/`.
-4. Safely delete the temporary ZIP archive to save storage space.
-5. Display the extracted directory structure.
+*This downloads the zip from Mendeley Data, unzips all categories into `training/dataset/`, and cleans up the temporary archive.*
 
 ---
 
-## Method 1: Cloud Training on Roboflow (Recommended)
-
-Since you are already retraining your model on Roboflow, follow this workflow to integrate new models into this live station:
-
-1. **Upload Datasets**: Upload new leaf images (from dataset snapshots or camera captures) to your Roboflow workspace.
-2. **Train Model**: Use Roboflow's serverless train system to train a new version of the **Chili Plant Disease** model.
-3. **Download & Cache Weights**:
-   Use the helper download script located in `scratch/` to pull the latest ONNX weights and class mappings directly from your Roboflow project:
-   ```bash
-   # Run the download helper script (it pulls from version 1 by default; update the VERSION variable as needed)
-   python scratch/download_chili_retrained.py
-   ```
-4. **Load in Web GUI**:
-   Select the **Chili Disease (Retrained v1)** or **Chili V2 (ba7v6)** preset in the dashboard UI. The system will load the ONNX runtime with hardware accelerated CoreML execution.
-
----
-
-## Method 2: Local YOLOv8 Fine-Tuning (On-Device)
-
-If you prefer to train models directly on your MacBook M2 using local datasets:
-
-### 1. Install Training Dependencies
-Install the `ultralytics` package (which installs PyTorch, torchvision, and training utilities):
+## 🚀 Step 2: Train the YOLO26 Model
+Start the hardware-adaptive YOLO26 training pipeline:
 ```bash
-./venv/bin/pip install ultralytics
-```
-
-### 2. Prepare Your Dataset
-Structure your dataset folder under `training/dataset/` as follows:
-```text
-dataset/
-├── data.yaml          # Class names and folder paths configuration
-├── train/
-│   ├── images/        # .jpg/.png images
-│   └── labels/        # YOLO format text files (.txt)
-└── val/
-    ├── images/
-    └── labels/
-```
-
-### 3. Run the Training Script
-Run the local training script:
-```bash
-python training/scripts/train_local.py
-```
-*Note: PyTorch will automatically use the Apple Silicon GPU via Metal Performance Shaders (MPS) if available, accelerating the training process on your M2 chip.*
-
-### 4. Export the Model to ONNX
-After training, convert the resulting `.pt` model file to the ONNX format required by the Web GUI:
-```bash
-python -c "from ultralytics import YOLO; model = YOLO('training/runs/detect/train/weights/best.pt'); model.export(format='onnx')"
-```
-Copy the exported `best.onnx` weights into the `dist/` directory as `weights.onnx` to make it selectable in the dashboard.
-
----
-
-## Method 3: Local YOLO26 Fine-Tuning (Edge-Device Optimized)
-
-For the absolute best performance on resource-constrained edge devices (like your MacBook M2 or mobile architectures), we recommend training with the **YOLO26** model family.
-
-### Why YOLO26?
-* **Natively NMS-Free**: YOLO26 eliminates post-processing Non-Maximum Suppression (NMS) calculations from the detection head, significantly reducing CPU latency.
-* **M2 CoreML Friendly**: Its lighter architecture compiles beautifully onto Apple Silicon Neural Engine (ANE) partitions without hitting dimension capability ceilings.
-
-### How to Run:
-```bash
-# Execute the YOLO26 training script
 python training/scripts/train_yolo26.py
 ```
-This script will:
-1. Automatically scan the Mendeley dataset to check if it's an **Object Detection** or **Image Classification** dataset.
-2. If it is a Classification dataset, it splits the folders into `train/val` sets (80/20 ratio) automatically.
-3. Automatically load the respective YOLO26 model (`yolo26n.pt` for detection or `yolo26n-cls.pt` for classification).
-4. Run the training loop using **MacBook M2 GPU Hardware Acceleration (Metal/MPS)**.
-5. Export the trained model directly into **ONNX format** when training completes.
+*   **Hardware Autotuning**: Automatically detects your RTX 4090 GPU and Intel Core i9 processor to scale the architecture up to **YOLO26 Medium (`yolo26m`)**, set **batch size to 64**, utilize **8 dataloader threads**, and activate **AMP (Automatic Mixed Precision)**.
+*   **ONNX Export**: Once training completes, the weights are automatically exported to `best.onnx`.
+
+---
+
+## 🔍 Step 3: Run the Model Parity Check (Target: 90% - 99%)
+Verify that the exported ONNX model matches the trained PyTorch model:
+```bash
+python training/scripts/parity_check.py
+```
+*   **Validation Check**: Evaluates model precision, recall, and mAP@50 against the dataset's validation split.
+*   **Inference Alignment**: Compares predictions (bounding boxes, class classifications, and confidence scores) side-by-side on a test image.
+
+### 💡 If Parity Falls Below the 99% Target:
+If the strict 99% match or confidence deviation (< 0.01) warning is triggered, use these methods to secure the **90% - 99% target range**:
+
+1. **Ensure FP32 ONNX Export**:
+   Run the export step manually without half-precision (FP16) or dynamic quantization, which preserves high precision float representations:
+   ```bash
+   python -c "from ultralytics import YOLO; model = YOLO('training/runs/detect/chili_disease_detection_m/weights/best.pt'); model.export(format='onnx', half=False, simplify=False)"
+   ```
+2. **Relax Inference Confidence Threshold**:
+   A minor deviation (e.g. `0.02` score difference) is normal when comparing PyTorch tensors to ONNX runtime float execution. If you get a warning, check the output metrics. Any match score **above 90%** is fully verified and ready for deployment to the live GUI.
+3. **Align Image Preprocessing**:
+   Ensure you run the parity check script using validation images of the same resolution (640x640) to prevent aspect ratio interpolation differences between PyTorch and ONNX Runtime.
